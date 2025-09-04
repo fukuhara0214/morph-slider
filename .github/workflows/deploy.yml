@@ -1,4 +1,4 @@
-name: Deploy zipped Vite app to Pages
+name: Deploy zipped site to Pages
 
 on:
   push:
@@ -20,26 +20,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ZIPがリポジトリ直下に「morph-slider.zip」という名前で置いてある前提
-      - name: Unzip project
+      - name: Debug list files
         run: |
-          sudo apt-get update && sudo apt-get install -y unzip
-          unzip -o morph-slider.zip -d .
+          echo "Repo root:"; ls -la
+
+      # ルート直下の *.zip を自動検出（名前が違ってもOK）
+      - name: Find ZIP file
+        run: |
+          set -e
+          ZIP=$(ls *.zip 2>/dev/null | head -n1 || true)
+          if [ -z "$ZIP" ]; then
+            echo "ERROR: リポジトリ直下にZIPが見つかりません。*.zip をアップしてください。"
+            exit 1
+          fi
+          echo "ZIP=$ZIP" >> $GITHUB_ENV
+          echo "Found ZIP: $ZIP"
+
+      - name: Install unzip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+      - name: Unzip
+        run: |
+          unzip -o "$ZIP" -d extracted
+          echo "Extracted tree (top 2 levels):"
+          find extracted -maxdepth 2 -print
+
+      # ZIP内の package.json を自動検出して、そのフォルダをプロジェクトディレクトリとみなす
+      - name: Detect project dir (has package.json)
+        run: |
+          set -e
+          PROJECT_DIR=$(find extracted -type f -name package.json -printf "%h\n" | head -n1)
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: ZIP内に package.json が見つかりません。正しいプロジェクトZIPか確認してください。"
+            exit 1
+          fi
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+          echo "Detected: $PROJECT_DIR"
+          cat "$PROJECT_DIR/package.json"
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - name: Install & build
-        working-directory: morph-slider
+      # lockファイルが無くても動くように npm install を採用
+      - name: Install deps and build
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           npm install
           npm run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: morph-slider/dist
+          path: ${{ env.PROJECT_DIR }}/dist
 
   deploy:
     needs: build
